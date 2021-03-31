@@ -9,6 +9,7 @@ use App\Models\Member;
 use App\Models\FamilyStatus;
 use App\Models\City;
 use App\Notifications\FeedbackNotification;
+use App\Services\Member\SendPhoneCodeService;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -94,11 +95,9 @@ class ApiController extends Controller
         }
     }
 
-    public function send_phone_code(LoginRegistrationRequest $request, SmsService $smsService)
+    public function send_phone_code(LoginRegistrationRequest $request, SendPhoneCodeService $sendPhoneCodeService)
     {
-        return response()->json(
-            $this->send_sms($request->phone)
-        );
+        return response()->json($sendPhoneCodeService->sendCode($request->phone));
     }
 
     public function check_phone_code(CheckPhoneCodeRequest $request)
@@ -346,75 +345,6 @@ class ApiController extends Controller
         }
 
         return response()->json(['status' => true]);
-    }
-
-    function send_sms($phone)
-    {
-        $member = Member::firstOrCreate(['phone' => $phone]);
-
-        if ($member->last_sms_sended_at == date("Y-m-d") || is_null($member->last_sms_sended_at)) {
-            if ($member->sms_sended_counter >= 10) {
-                return [
-                    'errors' => ['sms_sended_counter' => ['SMS sending limit has been reached.']],
-                ];
-            }
-
-            $counter = $member->sms_sended_counter + 1;
-        } else {
-            $counter = 1;
-        }
-
-        $member->update(
-            [
-                'sms_sended_counter' => $counter,
-                'last_sms_sended_at' => Carbon::now()
-            ]
-        );
-
-        if (!env('SMS_SEND', false)) {
-            $member->update(
-                [
-                    'sms_code' => '1111',
-                    'sms_code_expire' => Carbon::now()->addHour()
-                ]
-            );
-
-            return ['status' => true];
-        }
-
-        $code = substr(str_shuffle('0123456789'), 0, 4);
-
-        $client = new \GuzzleHttp\Client();
-
-        $response = $client->post(
-            'https://a2p-api.megalabs.ru/sms/v1/sms',
-            [
-                'http_errors' => false,
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'Authorization' => 'Basic ' . env('SMS_TOKEN')
-                ],
-                'json' => [
-                    'from' => 'ya_verny',
-                    'to' => (int)('7' . $phone),
-                    'message' => 'Ваш проверочный код: ' . $code
-                ]
-            ]
-        );
-
-        if ($response->getStatusCode() == 200) {
-            $member->update(
-                [
-                    'sms_code' => $code,
-                    'sms_code_expire' => Carbon::now()->addHour()
-                ]
-            );
-
-            return ['status' => true];
-        }
-
-        return ['status' => false];
     }
 
     function phone_confirm_token($code)
